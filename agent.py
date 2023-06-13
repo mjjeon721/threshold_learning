@@ -11,7 +11,7 @@ class Agent():
         Learning Agent
     '''
     def __init__(self, d_max, v_max, state_dim, action_dim, TOU_info, env, actor_lr = 1e-4, \
-                 critic_lr = 1e-3, tau = 0.001, max_memory_size = 100000):
+                 critic_lr = 1e-3, tau = 0.001, max_memory_size = 10000):
         self.d_max = d_max
         self.v_max = v_max
 
@@ -128,7 +128,7 @@ class Agent():
         x = torch.FloatTensor(state)
         d = action[:-1]
         if np.isin(state[-1], self.off_hrs):
-            a_n = 1e-2 / (1 + self.v_update_count[0]) ** (0.2)
+            a_n =  1 / (1 + self.v_update_count[0]) ** (0.5)
             c_n = 1e-2 / (1 + self.v_update_count[0]) ** (0.1)
             vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
             self.actor.v_plus += vec
@@ -147,7 +147,7 @@ class Agent():
             self.v_update_count[0] += 1
             self.actor.th_copy()
         else :
-            a_n = 1e-2 / (1 + self.v_update_count[1]) ** (0.2)
+            a_n = 1 / (1 + self.v_update_count[1]) ** (0.5)
             c_n = 1e-2 / (1 + self.v_update_count[1]) ** (0.1)
             vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
             self.actor.v_minus += vec

@@ -147,7 +147,7 @@ class Policy(nn.Module):
         d_cons = np.transpose(self.d_th_plus[:,state[:,-1].astype(int)])
         d_prod = np.transpose(self.d_th_minus[:, state[:, -1].astype(int)])
         v_cons = np.minimum(np.maximum(state[:,0] - self.v_th_plus[state[:,-1].astype(int)], 0), self.v_max).reshape(-1,1)
-        v_prod = np.minimum(np.maximum(state[:, 0] - self.v_th_minus[state[:, -1].astype(int)], 0), self.v_max).reshape(-1, 1)
+        v_prod = np.minimum(np.maximum(state[:,0] - self.v_th_minus[state[:, -1].astype(int)], 0), self.v_max).reshape(-1, 1)
 
         th_plus = np.sum(d_cons, axis = 1, keepdims = True) + v_cons
         th_minus = np.sum(d_prod, axis = 1, keepdims = True) + v_prod

@@ -27,7 +27,7 @@ K = len(a)
 #v_max : Maximum charging rate
 #T : Charging session length
 #gamma : Penalty
-v_max = 2
+v_max = 4
 T = 10
 gamma = 1
 
@@ -36,8 +36,8 @@ on_hrs = np.array([3, 4, 5, 6])
 off_hrs = np.setdiff1d(np.arange(0,T), on_hrs)
 
 # Renewable distribution parameter
-g_mean = 3
-g_std = 2
+g_mean = 4
+g_std = 3
 g_min = 0
 g_max = 10
 
@@ -51,24 +51,38 @@ env = Env([a,b], [g_mean, g_std, g_min, g_max], [on_hrs, off_hrs], [pi_p, pi_m],
 learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
 
 episode_len = T
-num_epi = 2000
+num_epi = 10000
 
 batch_size = 100
 
 trained_reward = []
 avg_trained_reward = []
 
-g_0_samples = truncnorm.rvs(-g_mean / g_std, (g_max - g_mean) / g_std, size = num_epi) * g_std + g_mean
+low = -g_mean / g_std
+high = (g_max - g_mean) / g_std
+
+#g_0_samples = truncnorm.rvs(-g_mean / g_std, (g_max - g_mean) / g_std, size = num_epi) * g_std + g_mean
+
+g_0_samples = truncnorm.rvs(low, high, loc = g_mean, scale = g_std, size = num_epi)
+y_0_samples = T * v_max * np.random.rand(num_epi)
+#plt.hist(g_0_samples)
+#plt.show()
+
+
 
 interaction = 0
 d_off_plus_history = []
 d_on_plus_history = []
 d_off_minus_history = []
 d_on_minus_history = []
+
+v_plus_history = []
+v_minus_history = []
+
 tic = time.perf_counter()
 for epi in range(num_epi) :
     epi_reward = 0
-    state = np.array([0, g_0_samples[epi], pi_p[0], pi_m[0], 0])
+    state = np.array([15, g_0_samples[epi], pi_p[0], pi_m[0], 0])
     for step in range(episode_len) :
         action = learning_agent.get_action(state)
 
@@ -83,22 +97,29 @@ for epi in range(num_epi) :
             learning_agent.d_th_update(state,action)
 
         # Updating Q network and EV charging policy
-        '''
+
         if interaction > 1000 and (interaction % 20 == 1) :
             if np.abs((np.sum(action) - state[1])) > 1e-6 :
                 for grad_update in range(20):
                     learning_agent.Q_update(batch_size)
-                    learning_agent.v_th_update(state, action)
             else :
                 for grad_update in range(20):
                     learning_agent.Q_update(batch_size)
-                    learning_agent.nz_update(state)
-        '''
+                learning_agent.nz_update(state)
+
+        if interaction > 1000 :
+            if (np.isin(state[-1], np.arange(0, on_hrs[0])) and np.sum(action) > state[1]) or (
+                    np.isin(state[-1], on_hrs) and np.sum(action) < state[1]):
+                learning_agent.v_th_update(state, action)
+
         if interaction % 50 == 1 :
             d_off_minus_history.append(copy.copy(learning_agent.actor.d_minus[1,:]))
             d_on_minus_history.append(copy.copy(learning_agent.actor.d_minus[0, :]))
             d_off_plus_history.append(copy.copy(learning_agent.actor.d_plus[1,:]))
             d_on_plus_history.append(copy.copy(learning_agent.actor.d_plus[0,:]))
+
+            v_plus_history.append(copy.copy(learning_agent.actor.v_plus))
+            v_minus_history.append(copy.copy(learning_agent.actor.v_minus))
 
         interaction += 1
         state = next_state
@@ -106,7 +127,7 @@ for epi in range(num_epi) :
     trained_reward.append(epi_reward)
     avg_trained_reward.append(np.mean(trained_reward[-100:]))
 
-    if epi % 50 == 49 :
+    if epi % 500 == 499 :
         toc = time.perf_counter()
         print('{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}'.format(epi, toc - tic, avg_trained_reward[-1]))
         tic = time.perf_counter()
@@ -114,8 +135,27 @@ for epi in range(num_epi) :
 d_off_minus_history = np.vstack(d_off_minus_history)
 d_on_minus_history = np.vstack(d_on_minus_history)
 d_off_plus_history = np.vstack(d_off_plus_history)
-d_on_plus_history = np.vstack(d_on_plus_history)
 '''
+plt.plot(np.arange(0, interaction, 50), v_minus_history)
+plt.grid()
+plt.show()
+
+plt.plot(np.arange(0, interaction, 50), v_plus_history)
+plt.grid()
+plt.show()
+
+print(learning_agent.v_update_count)
+
+avg_trained_reward = np.array(avg_trained_reward)
+smoothed_learning_curve = np.array([])
+for i in range(num_epi) :
+    smoothed_learning_curve = np.append(smoothed_learning_curve, np.mean(avg_trained_reward[np.maximum(i-10, 0):i+1]))
+
+plt.plot(np.arange(0, num_epi * T, T), smoothed_learning_curve)
+plt.grid()
+plt.show()
+
+d_on_plus_history = np.vstack(d_on_plus_history)
 plt.plot(np.arange(0,interaction, 50), d_off_minus_history[:,0] )
 plt.plot(np.arange(0,interaction, 50), np.ones(int(interaction / 50)) * opt_d_minus[0,0] )
 plt.grid()
