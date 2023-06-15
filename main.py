@@ -68,8 +68,6 @@ y_0_samples = T * v_max * np.random.rand(num_epi)
 #plt.hist(g_0_samples)
 #plt.show()
 
-
-
 interaction = 0
 d_off_plus_history = []
 d_on_plus_history = []
@@ -82,15 +80,16 @@ v_minus_history = []
 tic = time.perf_counter()
 for epi in range(num_epi) :
     epi_reward = 0
-    state = np.array([15, g_0_samples[epi], pi_p[0], pi_m[0], 0])
+    state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     for step in range(episode_len) :
         action = learning_agent.get_action(state)
-
         next_state = env.get_next_state(state, action)
         reward = env.get_reward(state, action)
         epi_reward += reward
 
-        learning_agent.memory.push(state, action, reward, next_state)
+        done = True if step == T-1 else False
+
+        learning_agent.memory.push(state, action, reward, next_state, done)
 
         # Updating consumption thresholds
         if np.abs((np.sum(action) - state[1])) > 1e-6 :
@@ -99,19 +98,14 @@ for epi in range(num_epi) :
         # Updating Q network and EV charging policy
 
         if interaction > 1000 and (interaction % 20 == 1) :
-            if np.abs((np.sum(action) - state[1])) > 1e-6 :
-                for grad_update in range(20):
-                    learning_agent.Q_update(batch_size)
-            else :
-                for grad_update in range(20):
-                    learning_agent.Q_update(batch_size)
-                learning_agent.nz_update(state)
-
+            for grad_update in range(20) :
+                learning_agent.update(batch_size)
+        '''
         if interaction > 1000 :
-            if (np.isin(state[-1], np.arange(0, on_hrs[0])) and np.sum(action) > state[1]) or (
-                    np.isin(state[-1], on_hrs) and np.sum(action) < state[1]):
+            if (np.isin(state[-1], np.arange(0, on_hrs[0])) and np.sum(action) > state[1] + 1e-6) or (
+                    np.isin(state[-1], on_hrs) and np.sum(action) + 1e-6 < state[1]):
                 learning_agent.v_th_update(state, action)
-
+        '''
         if interaction % 50 == 1 :
             d_off_minus_history.append(copy.copy(learning_agent.actor.d_minus[1,:]))
             d_on_minus_history.append(copy.copy(learning_agent.actor.d_minus[0, :]))
@@ -123,7 +117,6 @@ for epi in range(num_epi) :
 
         interaction += 1
         state = next_state
-
     trained_reward.append(epi_reward)
     avg_trained_reward.append(np.mean(trained_reward[-100:]))
 
@@ -135,7 +128,7 @@ for epi in range(num_epi) :
 d_off_minus_history = np.vstack(d_off_minus_history)
 d_on_minus_history = np.vstack(d_on_minus_history)
 d_off_plus_history = np.vstack(d_off_plus_history)
-'''
+
 plt.plot(np.arange(0, interaction, 50), v_minus_history)
 plt.grid()
 plt.show()
@@ -144,8 +137,9 @@ plt.plot(np.arange(0, interaction, 50), v_plus_history)
 plt.grid()
 plt.show()
 
-print(learning_agent.v_update_count)
 
+print(learning_agent.v_update_count)
+'''
 avg_trained_reward = np.array(avg_trained_reward)
 smoothed_learning_curve = np.array([])
 for i in range(num_epi) :

@@ -131,7 +131,7 @@ class Policy(nn.Module):
             return np.append(d_cons, v_cons)
         else :
             return np.append(d_prod, v_prod)
-
+'''
     def nz_action(self, state):
         out = self.fc1(state)
         out = self.relu(out)
@@ -139,8 +139,22 @@ class Policy(nn.Module):
         out = self.relu(out)
         out = self.fc3(out)
         out = self.softmax(out)
-        return state[1] * out
-    '''
+        out = self.softmax(out)
+        a_nz = torch.zeros((len(state), self.action_dim))
+        for j in range(self.action_dim):
+            ix = torch.argmax(out, dim=1)
+            v_max_ix = (ix == 2)#.detach().numpy()
+            out_i = out[torch.arange(0, len(state)), ix]
+            a_nz[torch.arange(0, len(state)), ix] = torch.minimum(torch.minimum((state[:, 1] * out_i), state[:, 0]),
+                                                            torch.Tensor(np.array([self.v_max]))) * v_max_ix + (
+                                                     torch.minimum((state[:, 1] * out_i),
+                                                                torch.Tensor(np.array([self.d_max]))) * ~v_max_ix)
+            out[torch.arange(0, len(state)), ix] = 0
+            state[:, 1] -= a_nz[torch.arange(0, len(state)), ix]
+            if j < self.action_dim - 1:
+                out = out / torch.sum(out, 1, keepdim=True)
+        return a_nz
+
 
     def action(self, state):
         state = state.reshape(-1, self.state_dim)
@@ -155,6 +169,7 @@ class Policy(nn.Module):
         cons_mask = state[:,[1]] < th_plus
         prod_mask = state[:,[1]] > th_minus
         nz_mask = ~cons_mask * ~prod_mask
+        a_nz = np.zeros((len(state),self.action_dim))
 
         x = torch.FloatTensor(state)
         out = self.fc1(x)
@@ -163,11 +178,23 @@ class Policy(nn.Module):
         out = self.relu(out)
         out = self.fc3(out)
         out = self.softmax(out)
-        a_nz = (x[:,[1]] * out).detach().numpy()
+        for j in range(self.action_dim):
+            ix = torch.argmax(out, dim = 1)
+            v_max_ix = (ix == 2).detach().numpy()
+            out_i = out[np.arange(0, len(state)), ix]
+            a_nz[np.arange(0, len(state)), ix] =  np.minimum(np.minimum((x[:, 1] * out_i).detach().numpy(), state[:, 0]),
+                       self.v_max) * v_max_ix + (
+                np.minimum((x[:, 1] * out_i).detach().numpy(), self.d_max)) * ~v_max_ix
+            out[np.arange(0, len(state)), ix] = 0
+            x[:,1] -= a_nz[np.arange(0, len(state)), ix]
+            if j < self.action_dim - 1:
+                out = out / torch.sum(out, 1, keepdim = True)
+
+        #a_nz = (x[:,[1]] * out).detach().numpy()
 
         a_cons = np.hstack([d_cons, v_cons])
         a_prod = np.hstack([d_prod, v_prod])
 
         action = a_cons * cons_mask + a_prod * prod_mask + a_nz * nz_mask
 
-        return action.reshape(-1)
+        return action
