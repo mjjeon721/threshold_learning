@@ -6,9 +6,12 @@ from environment import Env
 from scipy.stats import truncnorm
 import time
 import matplotlib.pyplot as plt
+from scipy.io import loadmat
+
 
 # Utility parameter
 a = np.array([2, 1.2])
+aa = np.array([a[0] - a[1], a[1] - a[0]])
 b = np.array([1,1])
 
 # NEM parameter : Off-peak / On-peak NEM parameters
@@ -18,10 +21,6 @@ pi_m = np.array([0.07, 0.12])
 # NEM optimal consumption
 opt_d_plus = (a - pi_p.reshape(-1,1)) / b
 opt_d_minus = (a - pi_m.reshape(-1,1)) / b
-
-# Consumption parameter
-d_max = 3
-K = len(a)
 
 # EV charging parameter
 #v_max : Maximum charging rate
@@ -34,6 +33,22 @@ gamma = 1
 # TOU parameter
 on_hrs = np.array([3, 4, 5, 6])
 off_hrs = np.setdiff1d(np.arange(0,T), on_hrs)
+
+# Optimal procrastination threshold
+delta = 2.409896891764526
+tau = 17.379661111107737
+
+opt_delta = np.concatenate([np.zeros(on_hrs[0]), np.ones(len(on_hrs)) * delta , np.zeros(T - on_hrs[-1] - 1)])
+opt_tau = np.concatenate([np.flip(np.arange(0, on_hrs[0])) * v_max + tau,np.flip(np.arange(0, T - on_hrs[0])) * v_max ])
+
+thetas = loadmat('theta.mat')
+thetas = thetas['theta_data']
+thetas = np.flip(thetas, 1)
+thetas = thetas[:,1:]
+
+# Consumption parameter
+d_max = 3
+K = len(a)
 
 # Renewable distribution parameter
 g_mean = 4
@@ -51,12 +66,15 @@ env = Env([a,b], [g_mean, g_std, g_min, g_max], [on_hrs, off_hrs], [pi_p, pi_m],
 learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
 
 episode_len = T
-num_epi = 10000
+num_epi = 5000
 
-batch_size = 100
+batch_size = 256
 
 trained_reward = []
 avg_trained_reward = []
+
+opt_return = []
+avg_opt_return = []
 
 low = -g_mean / g_std
 high = (g_max - g_mean) / g_std
@@ -80,7 +98,9 @@ v_minus_history = []
 tic = time.perf_counter()
 for epi in range(num_epi) :
     epi_reward = 0
+    opt_epi_reward = 0
     state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
+    opt_state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     for step in range(episode_len) :
         action = learning_agent.get_action(state)
         next_state = env.get_next_state(state, action)
@@ -100,12 +120,7 @@ for epi in range(num_epi) :
         if interaction > 1000 and (interaction % 20 == 1) :
             for grad_update in range(20) :
                 learning_agent.update(batch_size)
-        '''
-        if interaction > 1000 :
-            if (np.isin(state[-1], np.arange(0, on_hrs[0])) and np.sum(action) > state[1] + 1e-6) or (
-                    np.isin(state[-1], on_hrs) and np.sum(action) + 1e-6 < state[1]):
-                learning_agent.v_th_update(state, action)
-        '''
+
         if interaction % 50 == 1 :
             d_off_minus_history.append(copy.copy(learning_agent.actor.d_minus[1,:]))
             d_on_minus_history.append(copy.copy(learning_agent.actor.d_minus[0, :]))
@@ -115,14 +130,58 @@ for epi in range(num_epi) :
             v_plus_history.append(copy.copy(learning_agent.actor.v_plus))
             v_minus_history.append(copy.copy(learning_agent.actor.v_minus))
 
+        # Computing optimal action / reward for comparison
+        d_prod = opt_d_minus[0,:] if np.isin(opt_state[-1], off_hrs) else opt_d_minus[1,:]
+        d_cons = opt_d_plus[0,:] if np.isin(opt_state[-1], off_hrs) else opt_d_plus[1,:]
+
+        v_prod = np.minimum(np.maximum(opt_state[0] - opt_delta[int(opt_state[-1])], 0), v_max)
+        v_cons = np.minimum(np.maximum(opt_state[0] - opt_tau[int(opt_state[-1])], 0), v_max)
+
+        th_prod = sum(d_prod) + v_prod
+        th_cons = sum(d_cons) + v_cons
+
+        if opt_state[1] < th_cons :
+            opt_a = np.append(d_cons, v_cons)
+        elif opt_state[1] > th_prod :
+            opt_a = np.append(d_prod, v_prod)
+        elif opt_state[-1] == T-1 :
+            opt_v = v_prod
+            opt_d = (opt_state[1] - opt_v + aa) * 0.5
+            opt_a = np.append(opt_d, opt_v)
+        else :
+            theta = thetas[:,int(opt_state[-1])]
+            grad_coef = np.flip(np.arange(1, len(theta) ))
+            grad_coef2 = np.flip(np.arange(1, len(theta) -1) * np.arange(2, len(theta)))
+            v_i = np.zeros(11)
+            v_i[0] = np.maximum(opt_state[0] - opt_tau[int(opt_state[-1])], 0)
+            for i in range(10) :
+                yv = opt_state[0] - v_i[i]
+                f_val = np.polyval(grad_coef * theta[0:-1], yv) + a[0] - 0.5 * (opt_state[1] - v_i[i] + a[0] - a[1])
+                grad_val = -np.polyval(grad_coef2 * theta[0:-2], yv) + 0.5
+                v_i[i+1] = v_i[i] - f_val / grad_val
+                if abs(v_i[i+1] - v_i[i]) <= 1e-6 :
+                    break
+            opt_v = np.minimum(np.maximum(v_i[i+1], np.maximum(opt_state[0] - opt_tau[int(opt_state[-1])], 0)), np.minimum(np.maximum(opt_state[0] - opt_delta[int(opt_state[-1])],0), v_max))
+            opt_d = 0.5 * (opt_state[1] - opt_v + aa)
+            opt_a = np.append(opt_d, opt_v)
+        opt_next_state = env.get_next_state(opt_state, opt_a)
+        opt_next_state[1] = next_state[1]
+        opt_r = env.get_reward(opt_state, opt_a)
+        opt_epi_reward += opt_r
+        opt_state = opt_next_state
+
         interaction += 1
         state = next_state
+
+
+    opt_return.append(opt_epi_reward)
+    avg_opt_return.append(np.mean(opt_return[-100:]))
     trained_reward.append(epi_reward)
     avg_trained_reward.append(np.mean(trained_reward[-100:]))
 
     if epi % 500 == 499 :
         toc = time.perf_counter()
-        print('{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}'.format(epi, toc - tic, avg_trained_reward[-1]))
+        print('{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, opt reward : {3:.4f}'.format(epi, toc - tic, avg_trained_reward[-1], avg_opt_return[-1]))
         tic = time.perf_counter()
 
 d_off_minus_history = np.vstack(d_off_minus_history)
@@ -139,15 +198,22 @@ plt.show()
 
 
 print(learning_agent.v_update_count)
-'''
+
 avg_trained_reward = np.array(avg_trained_reward)
+avg_opt_return = np.array(avg_opt_return)
 smoothed_learning_curve = np.array([])
+smoothed_opt_return_curve = np.array([])
 for i in range(num_epi) :
     smoothed_learning_curve = np.append(smoothed_learning_curve, np.mean(avg_trained_reward[np.maximum(i-10, 0):i+1]))
-
-plt.plot(np.arange(0, num_epi * T, T), smoothed_learning_curve)
+    smoothed_opt_return_curve = np.append(smoothed_opt_return_curve, np.mean(avg_opt_return[np.maximum(i-10, 0):i+1]))
+plt.plot(np.arange(0, num_epi * T, T), smoothed_learning_curve, label = 'Threshold learning')
+plt.plot(np.arange(0, num_epi * T, T), smoothed_opt_return_curve, label = 'Optimal')
+plt.legend()
 plt.grid()
 plt.show()
+
+
+'''
 
 d_on_plus_history = np.vstack(d_on_plus_history)
 plt.plot(np.arange(0,interaction, 50), d_off_minus_history[:,0] )

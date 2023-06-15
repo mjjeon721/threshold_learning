@@ -10,8 +10,8 @@ class Agent():
     '''
         Learning Agent
     '''
-    def __init__(self, d_max, v_max, state_dim, action_dim, TOU_info, env, actor_lr = 1e-3, \
-                 critic_lr = 5e-3, tau = 0.001, max_memory_size = 10000):
+    def __init__(self, d_max, v_max, state_dim, action_dim, TOU_info, env, actor_lr = 5e-3, \
+                 critic_lr = 1e-3, tau = 0.001, max_memory_size = 10000):
         self.d_max = d_max
         self.v_max = v_max
 
@@ -117,81 +117,6 @@ class Agent():
             self.actor.d_minus[0, :] += a_n * self.thresh_grad_history[3, :]
             self.d_update_count[3] += 1
         self.actor.th_copy()
-    def v_th_update(self, state, action):
-        '''
-        EV charging threshold update method. Update using SPSA applied to Q function maximization
-        :param state: Current state
-        :param action: Current action
-        :return:
-        '''
-        # Updating v_th threshold only EV charging is nonzero
-        x = torch.FloatTensor(state)
-        d = action[:-1]
-        if np.isin(state[-1], self.off_hrs):
-            a_n =  1 / (1 + self.v_update_count[0]) ** (0.12)
-            c_n = 1e-2 / (1 + self.v_update_count[0]) ** (0.05)
-            vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
-            self.actor.v_plus += vec
-            self.actor.th_copy()
-            v1 = np.minimum(np.maximum(state[0] - self.actor.v_th_plus[int(state[-1])], 0), self.v_max)
-            self.actor.v_plus -= 2 * vec
-            self.actor.th_copy()
-            v2 = np.minimum(np.maximum(state[0] - self.actor.v_th_plus[int(state[-1])], 0), self.v_max)
-            a1 = torch.FloatTensor(np.append(d, v1))
-            a2 = torch.FloatTensor(np.append(d, v2))
-            Q1 = self.critic_target(x, a1).detach().numpy()
-            Q2 = self.critic_target(x, a2).detach().numpy()
-            grad_est = (Q1 - Q2) / vec / 2
-            self.v_th_grad_history[0] = self.v_th_grad_history[0] * 0.9 + 0.1 * grad_est
-            self.actor.v_plus += vec + a_n * self.v_th_grad_history[0]
-            self.v_update_count[0] += 1
-            self.actor.th_copy()
-        else :
-            a_n = 1 / (1 + self.v_update_count[1]) ** (0.12)
-            c_n = 1e-2 / (1 + self.v_update_count[1]) ** (0.05)
-            vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
-            self.actor.v_minus += vec
-            self.actor.th_copy()
-            v1 = np.minimum(np.maximum(state[0] - self.actor.v_th_minus[int(state[-1])], 0), self.v_max)
-            self.actor.v_minus -= 2 * vec
-            self.actor.th_copy()
-            v2 = np.minimum(np.maximum(state[0] - self.actor.v_th_minus[int(state[-1])], 0), self.v_max)
-            a1 = torch.FloatTensor(np.append(d, v1))
-            a2 = torch.FloatTensor(np.append(d, v2))
-            Q1 = self.critic_target(x, a1).detach().numpy()
-            Q2 = self.critic_target(x, a2).detach().numpy()
-            grad_est = (Q1 - Q2) / vec / 2
-            self.v_th_grad_history[1] = self.v_th_grad_history[1] * 0.9 + 0.1 * grad_est
-            self.actor.v_minus += vec + a_n * self.v_th_grad_history[1]
-            self.v_update_count[1] += 1
-            self.actor.th_copy()
-
-    def nz_update(self, state):
-        a_n = self.actor_lr / (1 + self.nz_update_count) ** 0.5
-        c_n = 1e-4 / (1 + self.nz_update_count) ** 0.3
-        vecs = []
-        for param in self.actor.parameters():
-            vec = c_n * (torch.Tensor(npr.binomial(1, 0.5, param.size())) * 2 -1) * (torch.rand(param.size()) + 0.5)
-            param.data.add_(vec)
-            vecs.append(vec)
-        x = torch.FloatTensor(state)
-        nz_plus = torch.FloatTensor(self.actor.action(state))
-        Q_plus = self.critic_target.forward(x, nz_plus).view(-1)
-        i = 0
-        for param in self.actor.parameters():
-            vec = vecs[i]
-            param.data.add_(-2 * vec)
-            i += 1
-        nz_minus = torch.FloatTensor(self.actor.action(state))
-        Q_minus = self.critic_target.forward(x, nz_minus).view(-1)
-        i = 0
-        for param in self.actor.parameters():
-            vec = vecs[i]
-            grad_est = (Q_plus - Q_minus) / vec / 2
-            self.grad_history[i] = 0.9 * self.grad_history[i] + 0.1 * grad_est
-            param.data.add_(vec + a_n * self.grad_history[i])
-            i += 1
-
 
     def update(self, batch_size) :
         states, actions, rewards, next_states, dones = self.memory.sample(batch_size)
@@ -226,8 +151,8 @@ class Agent():
 
         # Net-zero zone update
         states_NZ = states[NZ,:]
-        a_n = self.actor_lr / (1 + self.nz_update_count) ** 0.5
-        c_n = 1e-4 / (1 + self.nz_update_count) ** 0.3
+        a_n = self.actor_lr / (1 + self.nz_update_count) ** 0.2
+        c_n = 1e-4 / (1 + self.nz_update_count) ** 0.12
         vecs = []
         for param in self.actor.parameters():
             vec = c_n * (torch.Tensor(npr.binomial(1, 0.5, param.size())) * 2 -1) * (torch.rand(param.size()) + 0.5)
@@ -256,8 +181,8 @@ class Agent():
 
         # Net Consumption charging threshold update
         if sum(NC) > 0 :
-            a_n = self.actor_lr / (1 + self.v_update_count[0]) ** (0.12)
-            c_n = 1e-2 / (1 + self.v_update_count[0]) ** (0.05)
+            a_n = self.actor_lr / (1 + self.v_update_count[0]) ** (0.05)
+            c_n = self.actor_lr / (1 + self.v_update_count[0]) ** (0.02)
             states_NC = states[NC,:]
             actions_NC = actions[NC,:]
             vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
@@ -272,8 +197,8 @@ class Agent():
             self.actor.th_copy()
         # Net Production zone charging threshold update
         if sum(NP) > 0 :
-            a_n = self.actor_lr / (1 + self.v_update_count[1]) ** (0.12)
-            c_n = 1e-2 / (1 + self.v_update_count[1]) ** (0.05)
+            a_n = self.actor_lr / (1 + self.v_update_count[1]) ** (0.05)
+            c_n = self.actor_lr / (1 + self.v_update_count[1]) ** (0.02)
             states_NP = states[NP, :]
             actions_NP = actions[NP, :]
             vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
