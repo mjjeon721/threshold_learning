@@ -10,7 +10,7 @@ class Agent():
     '''
         Learning Agent
     '''
-    def __init__(self, d_max, v_max, state_dim, action_dim, TOU_info, env, actor_lr = 5e-3, \
+    def __init__(self, d_max, v_max, state_dim, action_dim, TOU_info, env, actor_lr = 1e-4, \
                  critic_lr = 1e-3, tau = 0.001, max_memory_size = 10000):
         self.d_max = d_max
         self.v_max = v_max
@@ -151,8 +151,8 @@ class Agent():
 
         # Net-zero zone update
         states_NZ = states[NZ,:]
-        a_n = self.actor_lr / (1 + self.nz_update_count) ** 0.2
-        c_n = 1e-4 / (1 + self.nz_update_count) ** 0.12
+        a_n = self.actor_lr / (1 + self.nz_update_count) ** 0.05
+        c_n = 1e-4 / (1 + self.nz_update_count) ** 0.02
         vecs = []
         for param in self.actor.parameters():
             vec = c_n * (torch.Tensor(npr.binomial(1, 0.5, param.size())) * 2 -1) * (torch.rand(param.size()) + 0.5)

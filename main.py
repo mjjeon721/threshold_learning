@@ -7,6 +7,7 @@ from scipy.stats import truncnorm
 import time
 import matplotlib.pyplot as plt
 from scipy.io import loadmat
+from agent_ddpg import *
 
 
 # Utility parameter
@@ -23,9 +24,9 @@ opt_d_plus = (a - pi_p.reshape(-1,1)) / b
 opt_d_minus = (a - pi_m.reshape(-1,1)) / b
 
 # EV charging parameter
-#v_max : Maximum charging rate
-#T : Charging session length
-#gamma : Penalty
+# v_max : Maximum charging rate
+# T : Charging session length
+# gamma : Penalty
 v_max = 4
 T = 10
 gamma = 1
@@ -64,17 +65,21 @@ action_dim = K + 1
 # Environment
 env = Env([a,b], [g_mean, g_std, g_min, g_max], [on_hrs, off_hrs], [pi_p, pi_m], gamma)
 learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
+DDPG_agent = DDPGAgent(state_dim, action_dim, d_max, v_max)
 
 episode_len = T
-num_epi = 5000
+num_epi = 10000
 
-batch_size = 256
+batch_size = 100
 
 trained_reward = []
 avg_trained_reward = []
 
 opt_return = []
 avg_opt_return = []
+
+DDPG_return = []
+avg_DDPG_return = []
 
 low = -g_mean / g_std
 high = (g_max - g_mean) / g_std
@@ -99,17 +104,31 @@ tic = time.perf_counter()
 for epi in range(num_epi) :
     epi_reward = 0
     opt_epi_reward = 0
+    DDPG_epi_return = 0
     state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     opt_state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
+    DDPG_state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     for step in range(episode_len) :
+        if interaction < 1000 :
+            DDPG_action = DDPG_agent.random_action(DDPG_state)
+        else :
+            explr_noise_std = 0.5
+            DDPG_action = np.clip(DDPG_agent.get_action(DDPG_state) + explr_noise_std * np.random.randn(action_dim),
+                                  np.zeros(action_dim),
+                                  np.append(d_max * np.ones(action_dim - 1), np.minimum(DDPG_state[0], v_max))).reshape(-1)
         action = learning_agent.get_action(state)
         next_state = env.get_next_state(state, action)
+        DDPG_next_state = env.get_next_state(DDPG_state, DDPG_action)
+        DDPG_next_state[1] = next_state[1]
         reward = env.get_reward(state, action)
+        DDPG_reward = env.get_reward(DDPG_state, DDPG_action)
         epi_reward += reward
+        DDPG_epi_return += DDPG_reward
 
         done = True if step == T-1 else False
 
         learning_agent.memory.push(state, action, reward, next_state, done)
+        DDPG_agent.memory.push(DDPG_state, DDPG_action, DDPG_reward, DDPG_next_state, done)
 
         # Updating consumption thresholds
         if np.abs((np.sum(action) - state[1])) > 1e-6 :
@@ -119,7 +138,13 @@ for epi in range(num_epi) :
 
         if interaction > 1000 and (interaction % 20 == 1) :
             for grad_update in range(20) :
-                learning_agent.update(batch_size)
+                learning_agent.update(256)
+
+        # DDPG update
+        if interaction > 1000 and (interaction % 20 == 1) :
+            for grad_update in range(20):
+                # agent_tddpg.update(batch_size, update_count)
+                DDPG_agent.update(batch_size)
 
         if interaction % 50 == 1 :
             d_off_minus_history.append(copy.copy(learning_agent.actor.d_minus[1,:]))
@@ -172,18 +197,33 @@ for epi in range(num_epi) :
 
         interaction += 1
         state = next_state
-
+        DDPG_state = DDPG_next_state
 
     opt_return.append(opt_epi_reward)
     avg_opt_return.append(np.mean(opt_return[-100:]))
     trained_reward.append(epi_reward)
     avg_trained_reward.append(np.mean(trained_reward[-100:]))
+    DDPG_return.append(DDPG_epi_return)
+    avg_DDPG_return.append(np.mean(DDPG_return[-100:]))
 
     if epi % 500 == 499 :
         toc = time.perf_counter()
-        print('{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, opt reward : {3:.4f}'.format(epi, toc - tic, avg_trained_reward[-1], avg_opt_return[-1]))
+        print(
+            '{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, DDPG return : {3:.4f}, opt reward : {4:.4f}'.format(
+                epi, toc - tic, avg_trained_reward[-1], avg_DDPG_return[-1], avg_opt_return[-1]))
         tic = time.perf_counter()
 
+x = np.arange(0, 15, 0.1)
+action_test = np.array([])
+for i in range(len(x)):
+    state = np.array([x[i], 2, pi_p[1], pi_m[1], 5])
+    actions = DDPG_agent.get_action(state).reshape(-1)
+    action_test = np.append(action_test, actions[-1])
+
+plt.plot(x, action_test)
+plt.grid()
+plt.show()
+'''
 d_off_minus_history = np.vstack(d_off_minus_history)
 d_on_minus_history = np.vstack(d_on_minus_history)
 d_off_plus_history = np.vstack(d_off_plus_history)
@@ -201,19 +241,21 @@ print(learning_agent.v_update_count)
 
 avg_trained_reward = np.array(avg_trained_reward)
 avg_opt_return = np.array(avg_opt_return)
+avg_DDPG_return = np.array(avg_DDPG_return)
 smoothed_learning_curve = np.array([])
 smoothed_opt_return_curve = np.array([])
+smoothed_ddpg_learning_curve = np.array([])
 for i in range(num_epi) :
     smoothed_learning_curve = np.append(smoothed_learning_curve, np.mean(avg_trained_reward[np.maximum(i-10, 0):i+1]))
     smoothed_opt_return_curve = np.append(smoothed_opt_return_curve, np.mean(avg_opt_return[np.maximum(i-10, 0):i+1]))
+    smoothed_ddpg_learning_curve = np.append(smoothed_ddpg_learning_curve, np.mean(avg_DDPG_return[np.maximum(i-10, 0):i+1]))
 plt.plot(np.arange(0, num_epi * T, T), smoothed_learning_curve, label = 'Threshold learning')
 plt.plot(np.arange(0, num_epi * T, T), smoothed_opt_return_curve, label = 'Optimal')
+plt.plot(np.arange(0, num_epi * T, T), smoothed_ddpg_learning_curve, label = 'DDPG')
 plt.legend()
 plt.grid()
 plt.show()
 
-
-'''
 
 d_on_plus_history = np.vstack(d_on_plus_history)
 plt.plot(np.arange(0,interaction, 50), d_off_minus_history[:,0] )

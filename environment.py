@@ -42,5 +42,5 @@ class Env:
         net_cons = np.sum(action) - state[1]
         reward = np.matmul(self.a, action[:-1]) - 0.5 * np.matmul(self.b, action[:-1] ** 2) - np.max(state[2:4] * net_cons)
         if state[-1] == (self.T - 1) :
-            reward -= self.gamma * (state[1] - action[-1])
+            reward -= self.gamma * (state[0] - action[-1])
         return reward
