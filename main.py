@@ -63,12 +63,12 @@ state_dim = 5
 action_dim = K + 1
 
 # Environment
-env = Env([a,b], [g_mean, g_std, g_min, g_max], [on_hrs, off_hrs], [pi_p, pi_m], gamma)
+env = Env([a,b], [g_mean, g_std, g_min, g_max], [on_hrs, off_hrs], [pi_p, pi_m], gamma, state_dim)
 learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
 DDPG_agent = DDPGAgent(state_dim, action_dim, d_max, v_max)
 
 episode_len = T
-num_epi = 10000
+num_epi = 2000
 
 batch_size = 100
 
@@ -206,7 +206,7 @@ for epi in range(num_epi) :
     DDPG_return.append(DDPG_epi_return)
     avg_DDPG_return.append(np.mean(DDPG_return[-100:]))
 
-    if epi % 500 == 499 :
+    if epi % 200 == 199 :
         toc = time.perf_counter()
         print(
             '{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, DDPG return : {3:.4f}, opt reward : {4:.4f}'.format(
@@ -256,6 +256,15 @@ plt.legend()
 plt.grid()
 plt.show()
 
+regret_th_learning = np.abs(smoothed_opt_return_curve - smoothed_learning_curve) / smoothed_opt_return_curve * 100
+regret_DDPG = np.abs(smoothed_opt_return_curve - smoothed_ddpg_learning_curve ) / smoothed_opt_return_curve * 100
+
+plt.plot(np.arange(0, num_epi * T, T), regret_th_learning, label = 'Threshold learning')
+plt.plot(np.arange(0, num_epi * T, T), regret_DDPG, label = 'DDPG')
+plt.ylim(top = 10, bottom = 0)
+plt.grid()
+plt.show()
+
 
 d_on_plus_history = np.vstack(d_on_plus_history)
 plt.plot(np.arange(0,interaction, 50), d_off_minus_history[:,0] )
@@ -298,3 +307,4 @@ plt.plot(np.arange(0,interaction, 50), np.ones(int(interaction / 50)) * opt_d_pl
 plt.grid()
 plt.show()
 '''
+

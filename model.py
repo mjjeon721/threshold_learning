@@ -12,6 +12,56 @@ def fanin_init(size):
     v = 1 / np.sqrt(fanin)
     return torch.Tensor(size).uniform_(-v, v)
 
+
+class Value(nn.Module):
+    def __init__(self, state_dim, hidden1 = 100, hidden2 = 64):
+        super(Value, self).__init__()
+        self.state_dim = state_dim
+        self.ut_fc0 = nn.Linear(state_dim - 1, hidden1)
+        self.ut_fc1 = nn.Linear(hidden1, hidden2)
+
+        self.zu_fc0 = nn.Linear(state_dim - 1, 1)
+        self.yu_fc0 = nn.Linear(state_dim - 1, 1)
+        self.u_fc0 = nn.Linear(state_dim - 1, hidden1)
+        self.z_fc0 = nn.Linear(1, hidden1)
+        self.y_fc0 = nn.Linear(1, hidden1)
+
+        self.zu_fc1 = nn.Linear(hidden1, hidden1)
+        self.yu_fc1 = nn.Linear(hidden1, 1)
+        self.u_fc1 = nn.Linear(hidden1, hidden2)
+        self.z_fc1 = nn.Linear(hidden1, hidden2)
+        self.y_fc1 = nn.Linear(1, hidden2)
+
+        self.zu_fc2 = nn.Linear(hidden2, hidden2)
+        self.yu_fc2 = nn.Linear(hidden2, 1)
+        self.u_fc2 = nn.Linear(hidden2, 1)
+        self.z_fc2 = nn.Linear(hidden2, 1)
+        self.y_fc2 = nn.Linear(1, 1)
+
+        self.relu = nn.ReLU()
+        self.leakyrelu = nn.LeakyReLU(negative_slope=0.1)
+        self.init_weights()
+
+    def init_weights(self) :
+        for param in self.parameters():
+            param.data = fanin_init(param.data.size())
+
+    def forward(self, state):
+        state = state.view(-1, self.state_dim)
+        u1 = self.relu(self.ut_fc0(state[:,1:]))
+        u2 = self.relu(self.ut_fc1(u1))
+
+        z1 = self.relu(self.z_fc0(state[:, [0]] * self.relu(self.zu_fc0(state[:, 1:]))) + self.y_fc0(
+            state[:, [0]] * self.yu_fc0(state[:, 1:])) + self.u_fc0(state[:, 1:]))
+
+        z2 = self.relu(self.z_fc1(z1 * self.relu(self.zu_fc1(u1))) + self.y_fc1(
+            state[:, [0]] * self.yu_fc1(u1)) + self.u_fc1(u1))
+
+        out = self.leakyrelu(self.z_fc2(z2 * self.relu(self.zu_fc2(u2))) + self.y_fc2(
+            state[:, [0]] * self.yu_fc2(u2)) + self.u_fc2(u2))
+
+        return out
+
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim, hidden1 = 100, hidden2 = 64):
         super(Critic, self).__init__()
@@ -198,3 +248,4 @@ class Policy(nn.Module):
         action = a_cons * cons_mask + a_prod * prod_mask + a_nz * nz_mask
 
         return action
+
