@@ -17,6 +17,7 @@ class Value(nn.Module):
     def __init__(self, state_dim, hidden1 = 100, hidden2 = 64):
         super(Value, self).__init__()
         self.state_dim = state_dim
+        '''
         self.ut_fc0 = nn.Linear(state_dim - 1, hidden1)
         self.ut_fc1 = nn.Linear(hidden1, hidden2)
 
@@ -37,10 +38,14 @@ class Value(nn.Module):
         self.u_fc2 = nn.Linear(hidden2, 1)
         self.z_fc2 = nn.Linear(hidden2, 1)
         self.y_fc2 = nn.Linear(1, 1)
-
+       '''
+        self.fc0 = nn.Linear(state_dim, hidden1)
+        self.fc1 = nn.Linear(hidden1, hidden2)
+        self.fc2 = nn.Linear(hidden2, 1)
         self.relu = nn.ReLU()
         self.leakyrelu = nn.LeakyReLU(negative_slope=0.1)
         self.init_weights()
+
 
     def init_weights(self) :
         for param in self.parameters():
@@ -48,6 +53,7 @@ class Value(nn.Module):
 
     def forward(self, state):
         state = state.view(-1, self.state_dim)
+        '''
         u1 = self.relu(self.ut_fc0(state[:,1:]))
         u2 = self.relu(self.ut_fc1(u1))
 
@@ -59,6 +65,12 @@ class Value(nn.Module):
 
         out = self.leakyrelu(self.z_fc2(z2 * self.relu(self.zu_fc2(u2))) + self.y_fc2(
             state[:, [0]] * self.yu_fc2(u2)) + self.u_fc2(u2))
+        '''
+        out = self.fc0(state)
+        out = self.relu(out)
+        out = self.fc1(out)
+        out = self.relu(out)
+        out = self.fc2(out)
 
         return out
 

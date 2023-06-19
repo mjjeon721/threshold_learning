@@ -68,7 +68,7 @@ learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
 DDPG_agent = DDPGAgent(state_dim, action_dim, d_max, v_max)
 
 episode_len = T
-num_epi = 5000
+num_epi = 3000
 
 batch_size = 100
 
@@ -306,5 +306,15 @@ plt.plot(np.arange(0,interaction, 50), d_on_plus_history[:,1] )
 plt.plot(np.arange(0,interaction, 50), np.ones(int(interaction / 50)) * opt_d_plus[1,1] )
 plt.grid()
 plt.show()
-'''
 
+
+x = np.arange(0, 15, 0.1)
+V_test = np.array([])
+for i in range(len(x)):
+    state = torch.Tensor(np.array([x[i], 3, pi_p[0], pi_m[0], 7]))
+    Values = learning_agent.value(state).view(-1).detach().numpy()
+    V_test = np.append(V_test, Values.item())
+
+plt.plot(x, V_test)
+plt.show()
+'''

@@ -155,6 +155,9 @@ class Agent():
         self.value_optim.zero_grad()
         value_loss.backward()
         self.value_optim.step()
+        #self.value.z_fc0.weight.data = torch.maximum(self.value.z_fc0.weight.data, torch.zeros(1))
+        #self.value.z_fc1.weight.data = torch.maximum(self.value.z_fc1.weight.data, torch.zeros(1))
+        #self.value.z_fc2.weight.data = torch.maximum(self.value.z_fc2.weight.data, torch.zeros(1))
         #soft_updates(self.value_target, self.value, self.tau)
 
         action_sum = torch.sum(actions, dim = 1)
