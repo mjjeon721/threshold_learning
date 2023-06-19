@@ -68,7 +68,7 @@ learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
 DDPG_agent = DDPGAgent(state_dim, action_dim, d_max, v_max)
 
 episode_len = T
-num_epi = 2000
+num_epi = 5000
 
 batch_size = 100
 

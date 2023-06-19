@@ -11,7 +11,7 @@ class Agent():
         Learning Agent
     '''
     def __init__(self, d_max, v_max, state_dim, action_dim, TOU_info, env, actor_lr = 5e-4, \
-                 critic_lr = 1e-3, value_lr = 1e-4, tau = 0.001, max_memory_size = 10000):
+                 critic_lr = 1e-3, value_lr = 1e-3, tau = 0.001, max_memory_size = 10000):
         self.d_max = d_max
         self.v_max = v_max
 
@@ -54,6 +54,7 @@ class Agent():
         self.value_criterion = nn.MSELoss()
         self.critic_optim = optim.Adam(self.critic.parameters(), critic_lr)
         self.value_optim = optim.Adam(self.value.parameters(), value_lr)
+        self.actor_optim = optim.Adam(self.actor.parameters(), actor_lr)
 
     def get_action(self, state):
         action = self.actor.action(state).reshape(-1)
@@ -136,7 +137,7 @@ class Agent():
         Qvals = self.critic.forward(states, actions)
         next_actions = torch.FloatTensor(self.actor.action(next_states))
         next_states = torch.FloatTensor(next_states)
-        y = rewards + (1 - dones) * self.critic_target(next_states, next_actions)
+        y = -rewards + (1 - dones) * self.critic_target(next_states, next_actions)
         critic_loss = self.critic_criterion(Qvals, y)
 
         self.critic_optim.zero_grad()
@@ -198,6 +199,7 @@ class Agent():
             i += 1
 
         self.nz_update_count += 1
+
 
         # Net Consumption charging threshold update
         if sum(NC) > 0 :
