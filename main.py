@@ -112,7 +112,7 @@ for epi in range(num_epi) :
         if interaction < 1000 :
             DDPG_action = DDPG_agent.random_action(DDPG_state)
         else :
-            explr_noise_std = 0.5
+            explr_noise_std = 0.4
             DDPG_action = np.clip(DDPG_agent.get_action(DDPG_state) + explr_noise_std * np.random.randn(action_dim),
                                   np.zeros(action_dim),
                                   np.append(d_max * np.ones(action_dim - 1), np.minimum(DDPG_state[0], v_max))).reshape(-1)

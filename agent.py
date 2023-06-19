@@ -149,16 +149,10 @@ class Agent():
         Vvals = self.value.forward(states)
         current_policy_actions = self.actor.action(states_np)
         y = self.critic_target.forward(states, torch.Tensor(current_policy_actions))
-        #current_policy_rewards = - torch.Tensor(self.env.get_reward(states_np, current_policy_actions)).view(-1,1)
-        #y = current_policy_rewards + (1 - dones) * self.Q(next_states)
         value_loss = self.value_criterion(Vvals, y)
         self.value_optim.zero_grad()
         value_loss.backward()
         self.value_optim.step()
-        #self.value.z_fc0.weight.data = torch.maximum(self.value.z_fc0.weight.data, torch.zeros(1))
-        #self.value.z_fc1.weight.data = torch.maximum(self.value.z_fc1.weight.data, torch.zeros(1))
-        #self.value.z_fc2.weight.data = torch.maximum(self.value.z_fc2.weight.data, torch.zeros(1))
-        #soft_updates(self.value_target, self.value, self.tau)
 
         action_sum = torch.sum(actions, dim = 1)
         DERs = states[:,1]
@@ -198,7 +192,7 @@ class Agent():
             vec = vecs[i]
             grad_est = (Q_plus - Q_minus) / vec / 2
             self.grad_history[i] = 0.9 * self.grad_history[i] + 0.1 * grad_est
-            param.data.add_(vec + a_n * grad_est)#self.grad_history[i])
+            param.data.add_(vec - a_n * grad_est)#self.grad_history[i])
             i += 1
 
         self.nz_update_count += 1

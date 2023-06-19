@@ -202,7 +202,8 @@ class Policy(nn.Module):
         out = self.fc3(out)
         out = self.softmax(out)
         out = self.softmax(out)
-        a_nz = torch.ones((len(state), self.action_dim))
+        a_nz = torch.zeros((len(state), self.action_dim))
+        '''
         a_nz[:,:-1] *= self.d_max
         a_nz[:,-1] *= torch.minimum(state[:,0], torch.Tensor(np.array([self.v_max])))
         out = out * a_nz
@@ -221,7 +222,6 @@ class Policy(nn.Module):
             if j < self.action_dim - 1:
                 out = out / torch.sum(out, 1, keepdim=True)
         return a_nz
-        '''
 
 
     def action(self, state):
