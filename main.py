@@ -212,7 +212,7 @@ for epi in range(num_epi) :
             '{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, DDPG return : {3:.4f}, opt reward : {4:.4f}'.format(
                 epi, toc - tic, avg_trained_reward[-1], avg_DDPG_return[-1], avg_opt_return[-1]))
         tic = time.perf_counter()
-
+'''
 x = np.arange(0, 15, 0.1)
 action_test = np.array([])
 for i in range(len(x)):
@@ -223,7 +223,7 @@ for i in range(len(x)):
 plt.plot(x, action_test)
 plt.grid()
 plt.show()
-'''
+
 d_off_minus_history = np.vstack(d_off_minus_history)
 d_on_minus_history = np.vstack(d_on_minus_history)
 d_off_plus_history = np.vstack(d_off_plus_history)

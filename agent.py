@@ -213,7 +213,8 @@ class Agent():
             V2 = torch.mean(self.value(x_minus))
             grad_est = (V1 - V2).detach().numpy() / vec / 2 - self.env.pi_p[0]
             self.v_th_grad_history[0] = self.v_th_grad_history[0] * 0.9 + grad_est * 0.1
-            self.actor.v_plus += a_n * grad_est#self.v_th_grad_history[0]
+            self.actor.v_plus -= a_n * grad_est#self.v_th_grad_history[0]
+            self.actor.v_plus = np.maximum(self.actor.v_plus, 0)
             self.v_update_count[0] += 1
             self.actor.th_copy()
 
@@ -230,7 +231,8 @@ class Agent():
             V2 = torch.mean(self.value(x_minus))
             grad_est = (V1 - V2).detach().numpy() / vec / 2 - self.env.pi_m[1]
             self.v_th_grad_history[1] = self.v_th_grad_history[1] * 0.9 + grad_est * 0.1
-            self.actor.v_minus += a_n * grad_est#self.v_th_grad_history[1]
+            self.actor.v_minus -= a_n * grad_est#self.v_th_grad_history[1]
+            self.actor.v_minus = np.maximum(self.actor.v_minus, 0)
             self.v_update_count[1] += 1
             self.actor.th_copy()
 
