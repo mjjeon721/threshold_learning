@@ -234,6 +234,7 @@ class Policy(nn.Module):
         th_plus = np.sum(d_cons, axis = 1, keepdims = True) + v_cons
         th_minus = np.sum(d_prod, axis = 1, keepdims = True) + v_prod
 
+
         cons_mask = state[:,[1]] < th_plus
         prod_mask = state[:,[1]] > th_minus
         nz_mask = ~cons_mask * ~prod_mask

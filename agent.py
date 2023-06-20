@@ -58,6 +58,16 @@ class Agent():
 
     def get_action(self, state):
         action = self.actor.action(state).reshape(-1)
+        if np.abs(sum(action) - state[1]) > 1e-6 :
+            action = action + np.clip(0.1 * npr.randn(self.action_dim), np.zeros(len(action)),
+                                      np.append(self.d_max * np.ones(self.action_dim - 1),
+                                                np.minimum(state[0], self.v_max)))
+        else :
+            z = 0.1 * npr.randn(self.action_dim - 1)
+            z = np.append(z, -sum(z))
+            action = action + np.clip(z, np.zeros(len(action)),
+                                      np.append(self.d_max * np.ones(self.action_dim - 1),
+                                                np.minimum(state[0], self.v_max)))
         return action
 
     def random_action(self):
