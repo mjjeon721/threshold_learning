@@ -90,7 +90,7 @@ class Critic(nn.Module):
         return out
 
 class Policy(nn.Module):
-    def __init__(self, d_max, v_max, on_hrs, T, state_dim, action_dim, thresh_init, hidden1 = 100, hidden2 = 64):
+    def __init__(self, d_max, v_max, on_hrs, T, state_dim, action_dim, log_std_min, log_std_max, init_w = 3e-3, hidden = 256):
         super(Policy, self).__init__()
         self.d_max = d_max
         self.v_max = v_max
@@ -102,11 +102,25 @@ class Policy(nn.Module):
         self.off_hrs2 = np.arange(on_hrs[-1], T)
         self.T = T
 
-        self.fc1 = nn.Linear(state_dim, hidden1)
-        self.fc2 = nn.Linear(hidden1, hidden2)
-        self.fc3 = nn.Linear(hidden2, action_dim)
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
+
+        self.fc1 = nn.Linear(state_dim, hidden)
+        self.fc2 = nn.Linear(hidden, hidden)
+        self.fc_mean = nn.Linear(hidden, 2 + action_dim)
+        self.fc_mean.weight.data.uniform_(-init_w, init_w)
+        self.fc_mean.bias.data.uniform_(-init_w, init_w)
+
+        self.fc_log_std = nn.Linear(hidden, 2 + action_dim)
+        self.fc_log_std.weight.data.uniform_(-init_w, init_w)
+        self.fc_log_std.bias.data.uniform_(-init_w, init_w)
+
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim = 1)
+        self.sigmoid = nn.Sigmoid()
+
+        self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
+        self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
 
         self.init_weight()
 
@@ -114,22 +128,12 @@ class Policy(nn.Module):
         self.d_minus = 0.5 * self.d_max * (1 + np.sort(np.random.rand(2, action_dim - 1), axis = 0))
 
 
-        self.v_plus = thresh_init[0]
-        self.v_minus = thresh_init[1]
-
         self.d_th_plus = np.hstack([np.ones((self.K, len(self.off_hrs1))) * self.d_plus[1, :].reshape(self.K, -1),
                                     np.ones((self.K, len(self.on_hrs))) * self.d_plus[0, :].reshape(self.K, -1),
                                     np.ones((self.K, len(self.off_hrs2))) * self.d_plus[1, :].reshape(self.K, -1)])
         self.d_th_minus = np.hstack([np.ones((self.K, len(self.off_hrs1))) * self.d_minus[1, :].reshape(self.K, -1),
                                      np.ones((self.K, len(self.on_hrs))) * self.d_minus[0, :].reshape(self.K, -1),
                                      np.ones((self.K, len(self.off_hrs2))) * self.d_minus[1, :].reshape(self.K, -1)])
-        self.v_th_plus = np.hstack([np.flip(self.off_hrs1) * self.v_max + self.v_plus,
-                                    (self.T - self.on_hrs - 1) * self.v_max,
-                                    (self.T - self.off_hrs2 - 1) * self.v_max])
-
-        self.v_th_minus = np.hstack([np.zeros(len(self.off_hrs1)),
-                                     np.ones(len(self.on_hrs)) * self.v_minus,
-                                     np.zeros(len(self.off_hrs2))])
     def th_copy(self):
         self.d_th_plus = np.hstack([np.ones((self.K, len(self.off_hrs1))) * self.d_plus[1, :].reshape(self.K, -1),
                                     np.ones((self.K, len(self.on_hrs))) * self.d_plus[0, :].reshape(self.K, -1),
@@ -137,83 +141,35 @@ class Policy(nn.Module):
         self.d_th_minus = np.hstack([np.ones((self.K, len(self.off_hrs1))) * self.d_minus[1, :].reshape(self.K, -1),
                                      np.ones((self.K, len(self.on_hrs))) * self.d_minus[0, :].reshape(self.K, -1),
                                      np.ones((self.K, len(self.off_hrs2))) * self.d_minus[1, :].reshape(self.K, -1)])
-        self.v_th_plus = np.hstack([np.flip(self.off_hrs1) * self.v_max + self.v_plus,
-                                    (self.T - self.on_hrs - 1) * self.v_max,
-                                    (self.T - self.off_hrs2 - 1) * self.v_max])
-        self.v_th_minus = np.hstack([np.zeros(len(self.off_hrs1)),
-                                     np.ones(len(self.on_hrs)) * self.v_minus,
-                                     np.zeros(len(self.off_hrs2))])
-    def init_weight(self):
-        self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
-        self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
-        self.fc3.weight.data = fanin_init(self.fc3.weight.data.size())
-    '''
-    def zone_ind(self, state):
+
+    def forward(self, state):
         state = state.reshape(-1, self.state_dim)
-        if np.isin(state[-1], self.off_hrs1):
-            d_cons = self.d_plus[0, :]
-            v_cons = np.minimum(
-                np.maximum(state[0] - self.v_plus - self.v_max * (self.off_hrs1[-1] - state[-1]), 0), self.v_max)
-            d_prod = self.d_minus[0,:]
-            v_prod = np.minimum(state[0], self.v_max)
+        x = torch.FloatTensor(state)
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
 
-        elif np.isin(state[-1], self.on_hrs):
-            d_cons = self.d_plus[1,:]
-            d_prod = self.d_minus[1,:]
-            v_cons = np.minimum(
-                np.maximum(state[0] - self.v_max * (self.T - state[-1]), 0), self.v_max)
-            v_prod = np.minimum(
-                np.maximum(state[0] - self.v_minus , 0), self.v_max)
-        else :
-            d_cons = self.d_plus[0, :]
-            v_cons = np.minimum(
-                np.maximum(state[0] - self.v_max * (self.T - state[-1]), 0), self.v_max)
-            d_prod = self.d_minus[0, :]
-            v_prod = np.minimum(state[0], self.v_max)
-        return [d_cons, d_prod, v_cons, v_prod]
-    def th_action(self, state):
-        d_cons, d_prod, v_cons, v_prod = self.zone_ind(state)
+        means = self.fc_mean(x)
+        log_stds = self.fc_log_std(x)
+        log_stds = torch.clamp(log_stds, self.log_std_min, self.log_std_max)
 
-        th_plus = np.sum(d_cons) + v_cons
-        th_minus = np.sum(d_prod) + v_prod
+        return means, log_stds
 
-        if state[1] < th_plus :
-            return np.append(d_cons, v_cons)
-        else :
-            return np.append(d_prod, v_prod)
-'''
-    def nz_action(self, state):
-        out = self.fc1(state)
+    def action(self, state):
+        means, log_stds = self.forward(state)
+        stds = log_stds.exp()
+
+        self.sigmoid(torch.Normal(means[:2], stds[:2])) * state[0]
+
+    def action(self, state):
+        state = state.reshape(-1, self.state_dim)
+        x = torch.FloatTensor(state)
+        out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
         out = self.relu(out)
         out = self.fc3(out)
-        out = self.softmax(out)
-        out = self.softmax(out)
-        a_nz = torch.ones((len(state), self.action_dim))
-        a_nz[:,:-1] *= self.d_max
-        a_nz[:,-1] *= torch.minimum(state[:,0], torch.Tensor(np.array([self.v_max])))
-        out = out * a_nz
-        return out
-        '''
-        for j in range(self.action_dim):
-            ix = torch.argmax(out, dim=1)
-            v_max_ix = (ix == 2)#.detach().numpy()
-            out_i = out[torch.arange(0, len(state)), ix]
-            a_nz[torch.arange(0, len(state)), ix] = torch.minimum(torch.minimum((state[:, 1] * out_i), state[:, 0]),
-                                                            torch.Tensor(np.array([self.v_max]))) * v_max_ix + (
-                                                     torch.minimum((state[:, 1] * out_i),
-                                                                torch.Tensor(np.array([self.d_max]))) * ~v_max_ix)
-            out[torch.arange(0, len(state)), ix] = 0
-            state[:, 1] -= a_nz[torch.arange(0, len(state)), ix]
-            if j < self.action_dim - 1:
-                out = out / torch.sum(out, 1, keepdim=True)
-        return a_nz
-        '''
 
 
-    def action(self, state):
-        state = state.reshape(-1, self.state_dim)
         d_cons = np.transpose(self.d_th_plus[:,state[:,-1].astype(int)])
         d_prod = np.transpose(self.d_th_minus[:, state[:, -1].astype(int)])
         v_cons = np.minimum(np.maximum(state[:,0] - self.v_th_plus[state[:,-1].astype(int)], 0), np.minimum(state[:,0],self.v_max)).reshape(-1,1)
@@ -254,4 +210,36 @@ class Policy(nn.Module):
         action = a_cons * cons_mask + a_prod * prod_mask + a_nz * nz_mask
 
         return action
+
+    def nz_action(self, state):
+        out = self.fc1(state)
+        out = self.relu(out)
+        out = self.fc2(out)
+        out = self.relu(out)
+        out = self.fc3(out)
+        out = self.softmax(out)
+        out = self.softmax(out)
+        a_nz = torch.ones((len(state), self.action_dim))
+        a_nz[:,:-1] *= self.d_max
+        a_nz[:,-1] *= torch.minimum(state[:,0], torch.Tensor(np.array([self.v_max])))
+        out = out * a_nz
+        return out
+        '''
+        for j in range(self.action_dim):
+            ix = torch.argmax(out, dim=1)
+            v_max_ix = (ix == 2)#.detach().numpy()
+            out_i = out[torch.arange(0, len(state)), ix]
+            a_nz[torch.arange(0, len(state)), ix] = torch.minimum(torch.minimum((state[:, 1] * out_i), state[:, 0]),
+                                                            torch.Tensor(np.array([self.v_max]))) * v_max_ix + (
+                                                     torch.minimum((state[:, 1] * out_i),
+                                                                torch.Tensor(np.array([self.d_max]))) * ~v_max_ix)
+            out[torch.arange(0, len(state)), ix] = 0
+            state[:, 1] -= a_nz[torch.arange(0, len(state)), ix]
+            if j < self.action_dim - 1:
+                out = out / torch.sum(out, 1, keepdim=True)
+        return a_nz
+        '''
+
+
+
 

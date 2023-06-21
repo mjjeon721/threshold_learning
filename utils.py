@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 import random
+import torch
 
 
 class Memory:
@@ -43,3 +44,13 @@ def soft_updates(target, source,tau):
         target_param.data.copy_(
             target_param.data * (1.0 - tau) + tau * param.data
         )
+
+def fanin_init(size):
+    '''
+        :param size: Neural network size
+        :return: Fan-in initialized neural network
+        :Explanation: fan-in initialization of the neural network.
+    '''
+    fanin = size[0]
+    v = 1 / np.sqrt(fanin)
+    return torch.Tensor(size).uniform_(-v, v)
