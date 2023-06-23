@@ -3,6 +3,7 @@ from utils import *
 import torch
 import numpy as np
 import torch.nn as nn
+import itertools
 import numpy.random as npr
 import torch.optim as optim
 
@@ -28,8 +29,14 @@ class Agent():
         v_minus_init = (self.T - self.on_hrs[-1] - 1) * v_max * npr.rand()
 
         self.actor = Policy(d_max, v_max, self.on_hrs, self.T, self.state_dim, self.action_dim, [v_plus_init, v_minus_init])
-        self.critic = Critic(self.state_dim, self.action_dim)
-        self.critic_target = Critic(self.state_dim, self.action_dim)
+        '''
+        self.critic1 = Critic(self.state_dim, self.action_dim)
+        self.critic2 = Critic(self.state_dim, self.action_dim)
+        self.critic_target1 = Critic(self.state_dim, self.action_dim)
+        self.critic_target2 = Critic(self.state_dim, self.action_dim)
+        '''
+        self.critic = Critic(state_dim, action_dim)
+        self.critic_target = Critic(state_dim, action_dim)
         self.value = Value(state_dim)
         #self.value_target = Value(state_dim)
 
@@ -40,9 +47,13 @@ class Agent():
         self.d_update_count = np.zeros(4)
         self.v_update_count = np.zeros(2)
         self.nz_update_count = 0
-
         hard_updates(self.critic_target, self.critic)
+        #hard_updates(self.critic_target1, self.critic1)
+        #hard_updates(self.critic_target2, self.critic2)
         #hard_updates(self.value_target, self.value)
+
+        #self.q_params = itertools.chain(self.critic1.parameters(), self.critic2.parameters())
+        self.q_params = self.critic.parameters()
 
         self.thresh_grad_history = np.zeros((4, action_dim-1))
         self.v_th_grad_history = np.zeros(2)
@@ -52,16 +63,13 @@ class Agent():
         self.memory = Memory(max_memory_size)
         self.critic_criterion = nn.MSELoss()
         self.value_criterion = nn.MSELoss()
-        self.critic_optim = optim.Adam(self.critic.parameters(), critic_lr)
+        self.critic_optim = optim.Adam(self.q_params, critic_lr)
         self.value_optim = optim.Adam(self.value.parameters(), value_lr)
         self.actor_optim = optim.Adam(self.actor.parameters(), actor_lr)
 
     def get_action(self, state):
         action = self.actor.action(state).reshape(-1)
         return action
-
-    def random_action(self):
-        return np.append(self.d_max * npr.rand(self.action_dim), self.v_max * npr.rand())
 
     def d_th_update(self, state, action):
         '''
@@ -134,21 +142,32 @@ class Agent():
         states_np = states.detach().clone().numpy()
 
         # Critic (Q-Value) Update
+        #Qvals1 = self.critic1.forward(states, actions)
+        #Qvals2 = self.critic2.forward(states, actions)
         Qvals = self.critic.forward(states, actions)
         next_actions = torch.FloatTensor(self.actor.action(next_states))
         next_states = torch.FloatTensor(next_states)
-        y = -rewards + (1 - dones) * self.critic_target(next_states, next_actions)
-        critic_loss = self.critic_criterion(Qvals, y)
+        #Qtarget1 = self.critic_target1.forward(next_states, next_actions)
+        #Qtarget2 = self.critic_target2.forward(next_states, next_actions)
+        Qtarget = self.critic_target.forward(next_states, next_actions)
 
+        y = -rewards + (1 - dones) * Qtarget#torch.minimum(Qtarget1, Qtarget2)
+        #critic_loss1 = self.critic_criterion(Qvals1, y)
+        #critic_loss2 = self.critic_criterion(Qvals2, y)
         self.critic_optim.zero_grad()
+        critic_loss = self.critic_criterion(Qvals, y)#critic_loss2 + critic_loss1
         critic_loss.backward()
         self.critic_optim.step()
         soft_updates(self.critic_target, self.critic, self.tau)
+        #soft_updates(self.critic_target1, self.critic1, self.tau)
+        #soft_updates(self.critic_target2, self.critic2, self.tau)
 
         # Value Update
         Vvals = self.value.forward(states)
         current_policy_actions = self.actor.action(states_np)
-        y = self.critic_target.forward(states, torch.Tensor(current_policy_actions))
+        #y1 = self.critic_target1.forward(states, torch.Tensor(current_policy_actions))
+        #y2 = self.critic_target2.forward(states, torch.Tensor(current_policy_actions))
+        y = self.critic_target.forward(states, torch.Tensor(current_policy_actions))#torch.minimum(y1, y2)
         #current_policy_rewards = - torch.Tensor(self.env.get_reward(states_np, current_policy_actions)).view(-1,1)
         #y = current_policy_rewards + (1 - dones) * self.Q(next_states)
         value_loss = self.value_criterion(Vvals, y)
@@ -171,7 +190,7 @@ class Agent():
         #NP = NP.bool()
 
         # Net-zero zone update
-        states_NZ = states[NZ,:]
+        states_NZ = states[NZ,:].detach().clone()
         a_n = self.actor_lr / (1 + self.nz_update_count) ** 0.05
         c_n = 1e-4 / (1 + self.nz_update_count) ** 0.02
         vecs = []
@@ -180,16 +199,22 @@ class Agent():
             param.data.add_(vec)
             vecs.append(vec)
         nz_plus = self.actor.nz_action(states_NZ)
-        states_NZ = states[NZ,:]
-        Q_plus = torch.mean(self.critic.forward(states_NZ, nz_plus).view(-1))
+        states_NZ = states[NZ,:].detach().clone()
+        #Q_plus1 = self.critic1.forward(states_NZ, nz_plus).view(-1)
+        #Q_plus2 = self.critic2.forward(states_NZ, nz_plus).view(-1)
+        #Q_plus = torch.minimum(Q_plus1, Q_plus2).mean()
+        Q_plus = self.critic.forward(states_NZ, nz_plus).mean()
         i = 0
         for param in self.actor.parameters():
             vec = vecs[i]
             param.data.add_(-2 * vec)
             i += 1
         nz_minus = self.actor.nz_action(states_NZ)
-        states_NZ = states[NZ,:]
-        Q_minus = torch.mean(self.critic.forward(states_NZ, nz_minus).view(-1))
+        states_NZ = states[NZ,:].detach().clone()
+        #Q_minus1 = self.critic1.forward(states_NZ, nz_minus).view(-1)
+        #Q_minus2 = self.critic2.forward(states_NZ, nz_minus).view(-1)
+        #Q_minus = torch.minimum(Q_minus1, Q_minus2).mean()
+        Q_minus = self.critic.forward(states_NZ, nz_minus).mean()
         i = 0
         for param in self.actor.parameters():
             vec = vecs[i]
@@ -200,11 +225,10 @@ class Agent():
 
         self.nz_update_count += 1
 
-
         # Net Consumption charging threshold update
         if sum(NC) > 0 :
-            states_NC = states[NC,1:]
-            a_n = self.actor_lr / (1 + self.v_update_count[0]) ** 0.05
+            states_NC = states[NC,1:].detach().clone()
+            a_n = 0.01 / (1 + self.v_update_count[0]) ** 0.05
             c_n = self.actor_lr / (1 + self.v_update_count[0]) ** 0.02
             vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
             tau_plus = torch.FloatTensor(self.actor.v_plus + vec)
@@ -215,14 +239,14 @@ class Agent():
             V2 = torch.mean(self.value(x_minus))
             grad_est = (V1 - V2).detach().numpy() / vec / 2 - self.env.pi_p[0]
             self.v_th_grad_history[0] = self.v_th_grad_history[0] * 0.9 + grad_est * 0.1
-            self.actor.v_plus -= a_n * grad_est#self.v_th_grad_history[0]
+            self.actor.v_plus -= a_n * self.v_th_grad_history[0]
             self.actor.v_plus = np.maximum(self.actor.v_plus, 0)
             self.v_update_count[0] += 1
             self.actor.th_copy()
 
         if sum(NP) > 0 :
-            states_NP = states[NP,1:]
-            a_n = self.actor_lr / (1 + self.v_update_count[1]) ** 0.05
+            states_NP = states[NP,1:].detach().clone()
+            a_n = 0.01 / (1 + self.v_update_count[1]) ** 0.05
             c_n = self.actor_lr / (1 + self.v_update_count[1]) ** 0.02
             vec = c_n * (npr.binomial(1, 0.5, 1) * 2 - 1) * (npr.rand(1) + 0.5)
             delta_plus = torch.FloatTensor(self.actor.v_minus + vec)
@@ -233,7 +257,7 @@ class Agent():
             V2 = torch.mean(self.value(x_minus))
             grad_est = (V1 - V2).detach().numpy() / vec / 2 - self.env.pi_m[1]
             self.v_th_grad_history[1] = self.v_th_grad_history[1] * 0.9 + grad_est * 0.1
-            self.actor.v_minus -= a_n * grad_est#self.v_th_grad_history[1]
+            self.actor.v_minus -= a_n * self.v_th_grad_history[1]
             self.actor.v_minus = np.maximum(self.actor.v_minus, 0)
             self.v_update_count[1] += 1
             self.actor.th_copy()

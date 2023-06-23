@@ -1,13 +1,21 @@
 import torch
-import numpy as np
-import torch.optim as optim
 from torch.distributions import Normal
 import torch.nn as nn
+import copy
 from utils import *
 
 class Policy_sac(nn.Module) :
-    def __init__(self, state_dim, action_dim, hidden_size = 256, init_w = 3e-3, log_std_min = -20, log_std_max = 2):
+    def __init__(self, d_max, v_max, state_dim, action_dim, hidden_size = 256, init_w = 3e-3, log_std_min = -20, log_std_max = 2):
         super(Policy_sac, self).__init__()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+
+        self.v_max = v_max
+        self.d_max = d_max
+
+        self.a_max = torch.ones(action_dim) * self.d_max
+        self.a_max[-1] = self.v_max
+
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
 
@@ -39,22 +47,31 @@ class Policy_sac(nn.Module) :
         return means, log_stds
 
     def get_actions(self, state):
+        state = torch.FloatTensor(state)
         means, log_stds = self.forward(state)
         stds = log_stds.exp()
 
-        normal = Normal(0,1)
+        normal = Normal(torch.zeros(self.action_dim),torch.ones(self.action_dim))
         z = normal.sample()
-        action = torch.sigmoid(means + stds * z)
-        return action
+        a_max = self.a_max.detach().clone()
+        a_max[-1] = torch.minimum(state[0], a_max[-1])
+        action = torch.sigmoid(means + stds * z) * a_max
+        return action.view(-1)
 
     def evaluate(self, state, epsilon=1e-6):
+        state = torch.FloatTensor(state).view(-1, self.state_dim)
         mean, log_std = self.forward(state)
         std = log_std.exp()
+        if torch.isnan(mean).all() :
+            print(mean)
 
-        normal = Normal(0, 1)
+        normal = Normal(torch.zeros(mean.size()), torch.ones(mean.size()))
         z = normal.sample()
-        action = torch.tanh(mean + std * z)
-        log_prob = Normal(mean, std).log_prob(mean + std * z) - torch.log(1 - action.pow(2) + epsilon)
+        a_max = self.a_max.detach().clone()
+        a_max = a_max.repeat(len(state),1)
+        a_max[:,-1] = torch.minimum(state[:,0], a_max[:,-1])
+        action = torch.sigmoid(mean + std * z) * a_max
+        log_prob = torch.sum(Normal(mean, std).log_prob(mean + std * z) - torch.log(action - action.pow(2) / a_max + epsilon ), 1, keepdim = True)
         return action, log_prob, z, mean, log_std
 
 class SoftQNetwork(nn.Module):

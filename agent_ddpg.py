@@ -54,8 +54,8 @@ class DDPGAgent :
         Qvals = self.critic.forward(states, actions)
         next_actions = self.actor_target.forward(next_states)
         next_Q = self.critic_target.forward(next_states, next_actions)
-        Qprime = rewards + (1 - dones) * next_Q
-        critic_loss = self.critic_criterion(Qvals, Qprime)
+        Qbackup = rewards + (1 - dones) * next_Q
+        critic_loss = self.critic_criterion(Qvals, Qbackup)
 
         # Critic updates
         self.critic_optim.zero_grad()
