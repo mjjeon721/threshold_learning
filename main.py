@@ -1,5 +1,8 @@
 import numpy as np
 import copy
+
+import torch
+
 import agent
 from agent import *
 from environment import Env
@@ -68,7 +71,7 @@ learning_agent = Agent(d_max, v_max, state_dim, action_dim, [T, on_hrs], env)
 DDPG_agent = DDPGAgent(state_dim, action_dim, d_max, v_max)
 
 episode_len = T
-num_epi = 3000
+num_epi = 5000
 
 batch_size = 100
 
@@ -100,12 +103,17 @@ d_on_minus_history = []
 v_plus_history = []
 v_minus_history = []
 
+opt_th_return = []
+avg_opt_th_return = []
+
 tic = time.perf_counter()
 for epi in range(num_epi) :
     epi_reward = 0
     opt_epi_reward = 0
+    epi_return_opt_th = 0
     DDPG_epi_return = 0
     state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
+    state_opt_th = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     opt_state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     DDPG_state = np.array([y_0_samples[epi], g_0_samples[epi], pi_p[0], pi_m[0], 0])
     for step in range(episode_len) :
@@ -117,6 +125,7 @@ for epi in range(num_epi) :
                                   np.zeros(action_dim),
                                   np.append(d_max * np.ones(action_dim - 1), np.minimum(DDPG_state[0], v_max))).reshape(-1)
         action = learning_agent.get_action(state)
+
         next_state = env.get_next_state(state, action)
         DDPG_next_state = env.get_next_state(DDPG_state, DDPG_action)
         DDPG_next_state[1] = next_state[1]
@@ -130,6 +139,25 @@ for epi in range(num_epi) :
         learning_agent.memory.push(state, action, reward, next_state, done)
         DDPG_agent.memory.push(DDPG_state, DDPG_action, DDPG_reward, DDPG_next_state, done)
 
+        v_prod_opt_th = np.minimum(np.maximum(state_opt_th[0] - opt_delta[int(state_opt_th[-1])], 0), v_max)
+        v_cons_opt_th = np.minimum(np.maximum(state_opt_th[0] - opt_tau[int(state_opt_th[-1])], 0), v_max)
+        d_prod_opt_th = learning_agent.actor.d_th_minus[:, int(state[-1])]
+        d_cons_opt_th = learning_agent.actor.d_th_plus[:, int(state[-1])]
+        opt_th_cons = np.sum(d_cons_opt_th) + v_cons_opt_th
+        opt_th_prod = np.sum(d_prod_opt_th) + v_prod_opt_th
+        if state_opt_th[1] < opt_th_cons :
+            action_opt_th = np.append(d_cons_opt_th, v_cons_opt_th)
+        elif state_opt_th[1] > opt_th_prod :
+            action_opt_th = np.append(d_prod_opt_th, v_prod_opt_th)
+        else :
+            state_tmp = torch.FloatTensor(state_opt_th).view(1,-1)
+            action_opt_th = learning_agent.actor.nz_action(state_tmp).view(-1).detach().numpy()
+
+        reward_opt_th = env.get_reward(state_opt_th, action_opt_th)
+        next_state_opt_th = env.get_next_state(state_opt_th, action_opt_th)
+        next_state_opt_th[1] = next_state[1]
+        epi_return_opt_th += reward_opt_th
+
         # Updating consumption thresholds
         if np.abs((np.sum(action) - state[1])) > 1e-6 :
             learning_agent.d_th_update(state,action)
@@ -138,7 +166,8 @@ for epi in range(num_epi) :
 
         if interaction > 1000 and (interaction % 20 == 1) :
             for grad_update in range(20) :
-                learning_agent.update(256)
+                learning_agent.update(batch_size)
+
 
         # DDPG update
         if interaction > 1000 and (interaction % 20 == 1) :
@@ -158,10 +187,8 @@ for epi in range(num_epi) :
         # Computing optimal action / reward for comparison
         d_prod = opt_d_minus[0,:] if np.isin(opt_state[-1], off_hrs) else opt_d_minus[1,:]
         d_cons = opt_d_plus[0,:] if np.isin(opt_state[-1], off_hrs) else opt_d_plus[1,:]
-
         v_prod = np.minimum(np.maximum(opt_state[0] - opt_delta[int(opt_state[-1])], 0), v_max)
         v_cons = np.minimum(np.maximum(opt_state[0] - opt_tau[int(opt_state[-1])], 0), v_max)
-
         th_prod = sum(d_prod) + v_prod
         th_cons = sum(d_cons) + v_cons
 
@@ -198,6 +225,7 @@ for epi in range(num_epi) :
         interaction += 1
         state = next_state
         DDPG_state = DDPG_next_state
+        state_opt_th = next_state_opt_th
 
     opt_return.append(opt_epi_reward)
     avg_opt_return.append(np.mean(opt_return[-100:]))
@@ -205,12 +233,14 @@ for epi in range(num_epi) :
     avg_trained_reward.append(np.mean(trained_reward[-100:]))
     DDPG_return.append(DDPG_epi_return)
     avg_DDPG_return.append(np.mean(DDPG_return[-100:]))
+    opt_th_return.append(epi_return_opt_th)
+    avg_opt_th_return.append(np.mean(opt_th_return[-100:]))
 
-    if epi % 200 == 199 :
+    if epi % 500 == 499 :
         toc = time.perf_counter()
         print(
-            '{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, DDPG return : {3:.4f}, opt reward : {4:.4f}'.format(
-                epi, toc - tic, avg_trained_reward[-1], avg_DDPG_return[-1], avg_opt_return[-1]))
+            '{0}th Episode, {1:.4f} (s) time elapsed, average reward : {2:.4f}, optimal thresh rewward : {3:.4f}, DDPG return : {4:.4f}, opt reward : {5:.4f}'.format(
+                epi, toc - tic, avg_trained_reward[-1], avg_opt_th_return[-1], avg_DDPG_return[-1], avg_opt_return[-1]))
         tic = time.perf_counter()
 '''
 x = np.arange(0, 15, 0.1)
@@ -242,26 +272,34 @@ print(learning_agent.v_update_count)
 avg_trained_reward = np.array(avg_trained_reward)
 avg_opt_return = np.array(avg_opt_return)
 avg_DDPG_return = np.array(avg_DDPG_return)
+avg_opt_th_return = np.array(avg_opt_th_return)
 smoothed_learning_curve = np.array([])
 smoothed_opt_return_curve = np.array([])
 smoothed_ddpg_learning_curve = np.array([])
+smoothed_opt_th_learning_curve = np.array([])
 for i in range(num_epi) :
-    smoothed_learning_curve = np.append(smoothed_learning_curve, np.mean(avg_trained_reward[np.maximum(i-10, 0):i+1]))
-    smoothed_opt_return_curve = np.append(smoothed_opt_return_curve, np.mean(avg_opt_return[np.maximum(i-10, 0):i+1]))
-    smoothed_ddpg_learning_curve = np.append(smoothed_ddpg_learning_curve, np.mean(avg_DDPG_return[np.maximum(i-10, 0):i+1]))
-plt.plot(np.arange(0, num_epi * T, T), smoothed_learning_curve, label = 'Threshold learning')
+    smoothed_learning_curve = np.append(smoothed_learning_curve, np.mean(avg_trained_reward[np.maximum(i-100, 0):i+1]))
+    smoothed_opt_return_curve = np.append(smoothed_opt_return_curve, np.mean(avg_opt_return[np.maximum(i-100, 0):i+1]))
+    smoothed_ddpg_learning_curve = np.append(smoothed_ddpg_learning_curve, np.mean(avg_DDPG_return[np.maximum(i-100, 0):i+1]))
+    smoothed_opt_th_learning_curve = np.append(smoothed_opt_th_learning_curve, np.mean(avg_opt_th_return[np.maximum(i-100, 0):i+1]))
+#plt.plot(np.arange(0, num_epi * T, T), smoothed_learning_curve, label = 'Threshold learning')
 plt.plot(np.arange(0, num_epi * T, T), smoothed_opt_return_curve, label = 'Optimal')
 plt.plot(np.arange(0, num_epi * T, T), smoothed_ddpg_learning_curve, label = 'DDPG')
+plt.plot(np.arange(0, num_epi * T, T), smoothed_opt_th_learning_curve, label = 'Optimal Thresh')
+plt.ylabel('Performance')
+plt.xlabel('Episodes')
 plt.legend()
 plt.grid()
 plt.show()
 
 regret_th_learning = np.abs(smoothed_opt_return_curve - smoothed_learning_curve) / smoothed_opt_return_curve * 100
 regret_DDPG = np.abs(smoothed_opt_return_curve - smoothed_ddpg_learning_curve ) / smoothed_opt_return_curve * 100
+regret_opt_th = np.abs(smoothed_opt_return_curve - smoothed_opt_th_learning_curve) / smoothed_opt_return_curve * 100
 
-plt.plot(np.arange(0, num_epi * T, T), regret_th_learning, label = 'Threshold learning')
-plt.plot(np.arange(0, num_epi * T, T), regret_DDPG, label = 'DDPG')
-plt.ylim(top = 10, bottom = 0)
+plt.plot(np.arange(10000, num_epi * T, T), regret_th_learning[1000:], label = 'Threshold learning')
+#plt.plot(np.arange(10000, num_epi * T, T), regret_DDPG[1000:], label = 'DDPG')
+plt.plot(np.arange(10000, num_epi * T, T), regret_opt_th[1000:], label = 'Optimal Threshold')
+#plt.ylim(top = 10, bottom = 0)
 plt.grid()
 plt.show()
 

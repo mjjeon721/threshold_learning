@@ -13,7 +13,7 @@ def fanin_init(size, fanin = None) :
 
 # Critic network class
 class Critic_d(nn.Module) :
-    def __init__(self, state_dim, action_dim, hidden1 = 128, hidden2 = 64, init_w = 3e-4):
+    def __init__(self, state_dim, action_dim, hidden1 = 256, hidden2 = 256, init_w = 3e-4):
         super(Critic_d, self).__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -47,7 +47,7 @@ class Critic_d(nn.Module) :
 
 # Actor network class
 class Actor_d(nn.Module):
-    def __init__(self, state_dim, action_dim, d_max, v_max, hidden1 = 128, hidden2 = 64, init_w = 3e-3):
+    def __init__(self, state_dim, action_dim, d_max, v_max, hidden1 = 256, hidden2 = 256, init_w = 3e-3):
         super(Actor_d, self).__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim

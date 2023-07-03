@@ -14,7 +14,7 @@ def fanin_init(size):
 
 
 class Value(nn.Module):
-    def __init__(self, state_dim, hidden1 = 100, hidden2 = 64):
+    def __init__(self, state_dim, hidden1 = 256, hidden2 = 256):
         super(Value, self).__init__()
         self.state_dim = state_dim
         '''
@@ -45,12 +45,14 @@ class Value(nn.Module):
         self.relu = nn.ReLU()
         self.leakyrelu = nn.LeakyReLU(negative_slope=0.1)
         self.init_weights()
-
+        self.fc2.weight.data.uniform_(-3e-3, 3e-3)
+        self.fc2.bias.data.uniform_(-3e-3, 3e-3)
 
     def init_weights(self) :
-        for param in self.parameters():
-            param.data = fanin_init(param.data.size())
-
+        self.fc0.weight.data = fanin_init(self.fc0.weight.data.size())
+        self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
+        self.fc0.bias.data = fanin_init(self.fc0.bias.data.size())
+        self.fc1.bias.data = fanin_init(self.fc1.bias.data.size())
     def forward(self, state):
         state = state.view(-1, self.state_dim)
         '''
@@ -75,7 +77,7 @@ class Value(nn.Module):
         return out
 
 class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden1 = 100, hidden2 = 64):
+    def __init__(self, state_dim, action_dim, hidden1 = 256, hidden2 = 256):
         super(Critic, self).__init__()
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -84,11 +86,14 @@ class Critic(nn.Module):
         self.fc3 = nn.Linear(hidden2, 1)
         self.relu = nn.ReLU()
         self.init_weight()
+        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
+        self.fc3.bias.data.uniform_(-3e-3, 3e-3)
 
     def init_weight(self):
         self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
         self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
-        self.fc3.weight.data = fanin_init(self.fc3.weight.data.size())
+        self.fc1.bias.data = fanin_init(self.fc1.bias.data.size())
+        self.fc2.bias.data = fanin_init(self.fc2.bias.data.size())
 
     def forward(self, state, action):
         state = state.view(-1,self.state_dim)
@@ -102,7 +107,7 @@ class Critic(nn.Module):
         return out
 
 class Policy(nn.Module):
-    def __init__(self, d_max, v_max, on_hrs, T, state_dim, action_dim, thresh_init, hidden1 = 100, hidden2 = 64):
+    def __init__(self, d_max, v_max, on_hrs, T, state_dim, action_dim, thresh_init, hidden1 = 256, hidden2 = 256):
         super(Policy, self).__init__()
         self.d_max = d_max
         self.v_max = v_max
@@ -121,6 +126,8 @@ class Policy(nn.Module):
         self.softmax = nn.Softmax(dim = 1)
 
         self.init_weight()
+        self.fc3.weight.data.uniform_(-3e-3,3e-3)
+        self.fc3.bias.data.uniform_(-3e-3, 3e-3)
 
         self.d_plus = 0.5 * self.d_max * np.sort(np.random.rand(2,action_dim - 1), axis = 0)
         self.d_minus = 0.5 * self.d_max * (1 + np.sort(np.random.rand(2, action_dim - 1), axis = 0))
@@ -158,7 +165,9 @@ class Policy(nn.Module):
     def init_weight(self):
         self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
         self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
-        self.fc3.weight.data = fanin_init(self.fc3.weight.data.size())
+        self.fc2.bias.data = fanin_init(self.fc2.bias.data.size())
+        self.fc1.bias.data = fanin_init(self.fc1.bias.data.size())
+
     '''
     def zone_ind(self, state):
         state = state.reshape(-1, self.state_dim)
@@ -201,12 +210,11 @@ class Policy(nn.Module):
         out = self.relu(out)
         out = self.fc3(out)
         out = self.softmax(out)
-        out = self.softmax(out)
-        a_nz = torch.zeros((len(state), self.action_dim))
-        '''
-        a_nz[:,:-1] *= self.d_max
-        a_nz[:,-1] *= torch.minimum(state[:,0], torch.Tensor(np.array([self.v_max])))
-        out = out * a_nz
+        a_max = torch.ones((len(state), self.action_dim))
+
+        a_max[:,:-1] *= self.d_max
+        a_max[:,-1] *= torch.minimum(state[:,0], torch.Tensor(np.array([self.v_max])))
+        out = torch.minimum(out * state[:,[1]], a_max)
         return out
         '''
         for j in range(self.action_dim):
@@ -222,6 +230,8 @@ class Policy(nn.Module):
             if j < self.action_dim - 1:
                 out = out / torch.sum(out, 1, keepdim=True)
         return a_nz
+        '''
+
 
 
     def action(self, state):
@@ -238,7 +248,6 @@ class Policy(nn.Module):
         cons_mask = state[:,[1]] < th_plus
         prod_mask = state[:,[1]] > th_minus
         nz_mask = ~cons_mask * ~prod_mask
-        a_nz = np.zeros((len(state),self.action_dim))
 
         x = torch.FloatTensor(state)
         out = self.fc1(x)
@@ -247,6 +256,7 @@ class Policy(nn.Module):
         out = self.relu(out)
         out = self.fc3(out)
         out = self.softmax(out)
+        '''
         for j in range(self.action_dim):
             ix = torch.argmax(out, dim = 1)
             v_max_ix = (ix == 2).detach().numpy()
@@ -258,8 +268,15 @@ class Policy(nn.Module):
             x[:,1] -= a_nz[np.arange(0, len(state)), ix]
             if j < self.action_dim - 1:
                 out = out / torch.sum(out, 1, keepdim = True)
-
-        #a_nz = (x[:,[1]] * out).detach().numpy()
+        '''
+        a_max = np.ones((len(state), self.action_dim))
+        #state_torch = torch.FloatTensor(state)
+        a_max[:, :-1] *= self.d_max
+        a_max[:, -1] *= np.minimum(state[:, 0], self.v_max)
+        #a_nz = out * a_nz
+        #a_nz = a_nz.detach().numpy()
+        a_nz = (x[:,[1]] * out).detach().numpy()
+        a_nz = np.minimum(a_nz, a_max)
 
         a_cons = np.hstack([d_cons, v_cons])
         a_prod = np.hstack([d_prod, v_prod])
